@@ -16,7 +16,9 @@
 
 import fs from 'fs';
 import path from 'path';
-import { query, HookCallback, PreCompactHookInput, PreToolUseHookInput } from '@anthropic-ai/claude-agent-sdk';
+// ====== CLAUDE =============
+// import { HookCallback, PreCompactHookInput, PreToolUseHookInput } from '@anthropic-ai/claude-agent-sdk';
+import { LOCAL_TOOLS, executeTool } from './local-tools.js';
 import { fileURLToPath } from 'url';
 
 interface ContainerInput {
@@ -63,38 +65,39 @@ const IPC_POLL_MS = 500;
  * Push-based async iterable for streaming user messages to the SDK.
  * Keeps the iterable alive until end() is called, preventing isSingleUserTurn.
  */
-class MessageStream {
-  private queue: SDKUserMessage[] = [];
-  private waiting: (() => void) | null = null;
-  private done = false;
-
-  push(text: string): void {
-    this.queue.push({
-      type: 'user',
-      message: { role: 'user', content: text },
-      parent_tool_use_id: null,
-      session_id: '',
-    });
-    this.waiting?.();
-  }
-
-  end(): void {
-    this.done = true;
-    this.waiting?.();
-  }
-
-  async *[Symbol.asyncIterator](): AsyncGenerator<SDKUserMessage> {
-    while (true) {
-      while (this.queue.length > 0) {
-        yield this.queue.shift()!;
-      }
-      if (this.done) return;
-      await new Promise<void>(r => { this.waiting = r; });
-      this.waiting = null;
-    }
-  }
-}
-
+// ====== CLAUDE =============
+// class MessageStream {
+//   private queue: SDKUserMessage[] = [];
+//   private waiting: (() => void) | null = null;
+//   private done = false;
+// 
+//   push(text: string): void {
+//     this.queue.push({
+//       type: 'user',
+//       message: { role: 'user', content: text },
+//       parent_tool_use_id: null,
+//       session_id: '',
+//     });
+//     this.waiting?.();
+//   }
+// 
+//   end(): void {
+//     this.done = true;
+//     this.waiting?.();
+//   }
+// 
+//   async *[Symbol.asyncIterator](): AsyncGenerator<SDKUserMessage> {
+//     while (true) {
+//       while (this.queue.length > 0) {
+//         yield this.queue.shift()!;
+//       }
+//       if (this.done) return;
+//       await new Promise<void>(r => { this.waiting = r; });
+//       this.waiting = null;
+//     }
+//   }
+// }
+// 
 async function readStdin(): Promise<string> {
   return new Promise((resolve, reject) => {
     let data = '';
@@ -143,71 +146,75 @@ function getSessionSummary(sessionId: string, transcriptPath: string): string | 
 /**
  * Archive the full transcript to conversations/ before compaction.
  */
-function createPreCompactHook(assistantName?: string): HookCallback {
-  return async (input, _toolUseId, _context) => {
-    const preCompact = input as PreCompactHookInput;
-    const transcriptPath = preCompact.transcript_path;
-    const sessionId = preCompact.session_id;
 
-    if (!transcriptPath || !fs.existsSync(transcriptPath)) {
-      log('No transcript found for archiving');
-      return {};
-    }
 
-    try {
-      const content = fs.readFileSync(transcriptPath, 'utf-8');
-      const messages = parseTranscript(content);
+// function createPreCompactHook(assistantName?: string): HookCallback {
+//   return async (input, _toolUseId, _context) => {
+//     const preCompact = input as PreCompactHookInput;
+//     const transcriptPath = preCompact.transcript_path;
+//     const sessionId = preCompact.session_id;
 
-      if (messages.length === 0) {
-        log('No messages to archive');
-        return {};
-      }
+//     if (!transcriptPath || !fs.existsSync(transcriptPath)) {
+//       log('No transcript found for archiving');
+//       return {};
+//     }
 
-      const summary = getSessionSummary(sessionId, transcriptPath);
-      const name = summary ? sanitizeFilename(summary) : generateFallbackName();
+//     try {
+//       const content = fs.readFileSync(transcriptPath, 'utf-8');
+//       const messages = parseTranscript(content);
 
-      const conversationsDir = '/workspace/group/conversations';
-      fs.mkdirSync(conversationsDir, { recursive: true });
+//       if (messages.length === 0) {
+//         log('No messages to archive');
+//         return {};
+//       }
 
-      const date = new Date().toISOString().split('T')[0];
-      const filename = `${date}-${name}.md`;
-      const filePath = path.join(conversationsDir, filename);
+//       const summary = getSessionSummary(sessionId, transcriptPath);
+//       const name = summary ? sanitizeFilename(summary) : generateFallbackName();
 
-      const markdown = formatTranscriptMarkdown(messages, summary, assistantName);
-      fs.writeFileSync(filePath, markdown);
+//       const conversationsDir = '/workspace/group/conversations';
+//       fs.mkdirSync(conversationsDir, { recursive: true });
 
-      log(`Archived conversation to ${filePath}`);
-    } catch (err) {
-      log(`Failed to archive transcript: ${err instanceof Error ? err.message : String(err)}`);
-    }
+//       const date = new Date().toISOString().split('T')[0];
+//       const filename = `${date}-${name}.md`;
+//       const filePath = path.join(conversationsDir, filename);
 
-    return {};
-  };
-}
+//       const markdown = formatTranscriptMarkdown(messages, summary, assistantName);
+//       fs.writeFileSync(filePath, markdown);
+
+//       log(`Archived conversation to ${filePath}`);
+//     } catch (err) {
+//       log(`Failed to archive transcript: ${err instanceof Error ? err.message : String(err)}`);
+//     }
+
+//     return {};
+//   };
+// }
 
 // Secrets to strip from Bash tool subprocess environments.
 // These are needed by claude-code for API auth but should never
 // be visible to commands Kit runs.
-const SECRET_ENV_VARS = ['ANTHROPIC_API_KEY', 'CLAUDE_CODE_OAUTH_TOKEN'];
 
-function createSanitizeBashHook(): HookCallback {
-  return async (input, _toolUseId, _context) => {
-    const preInput = input as PreToolUseHookInput;
-    const command = (preInput.tool_input as { command?: string })?.command;
-    if (!command) return {};
 
-    const unsetPrefix = `unset ${SECRET_ENV_VARS.join(' ')} 2>/dev/null; `;
-    return {
-      hookSpecificOutput: {
-        hookEventName: 'PreToolUse',
-        updatedInput: {
-          ...(preInput.tool_input as Record<string, unknown>),
-          command: unsetPrefix + command,
-        },
-      },
-    };
-  };
-}
+// const SECRET_ENV_VARS = ['ANTHROPIC_API_KEY', 'CLAUDE_CODE_OAUTH_TOKEN'];
+
+// function createSanitizeBashHook(): HookCallback {
+//   return async (input, _toolUseId, _context) => {
+//     const preInput = input as PreToolUseHookInput;
+//     const command = (preInput.tool_input as { command?: string })?.command;
+//     if (!command) return {};
+
+//     const unsetPrefix = `unset ${SECRET_ENV_VARS.join(' ')} 2>/dev/null; `;
+//     return {
+//       hookSpecificOutput: {
+//         hookEventName: 'PreToolUse',
+//         updatedInput: {
+//           ...(preInput.tool_input as Record<string, unknown>),
+//           command: unsetPrefix + command,
+//         },
+//       },
+//     };
+//   };
+// }
 
 function sanitizeFilename(summary: string): string {
   return summary
@@ -354,6 +361,145 @@ function waitForIpcMessage(): Promise<string | null> {
  * allowing agent teams subagents to run to completion.
  * Also pipes IPC messages into the stream during the query.
  */
+// ====== CLAUDE =============
+// async function runQuery(
+//   prompt: string,
+//   sessionId: string | undefined,
+//   mcpServerPath: string,
+//   containerInput: ContainerInput,
+//   sdkEnv: Record<string, string | undefined>,
+//   resumeAt?: string,
+// ): Promise<{ newSessionId?: string; lastAssistantUuid?: string; closedDuringQuery: boolean }> {
+//   const stream = new MessageStream();
+//   stream.push(prompt);
+// 
+//   // Poll IPC for follow-up messages and _close sentinel during the query
+//   let ipcPolling = true;
+//   let closedDuringQuery = false;
+//   const pollIpcDuringQuery = () => {
+//     if (!ipcPolling) return;
+//     if (shouldClose()) {
+//       log('Close sentinel detected during query, ending stream');
+//       closedDuringQuery = true;
+//       stream.end();
+//       ipcPolling = false;
+//       return;
+//     }
+//     const messages = drainIpcInput();
+//     for (const text of messages) {
+//       log(`Piping IPC message into active query (${text.length} chars)`);
+//       stream.push(text);
+//     }
+//     setTimeout(pollIpcDuringQuery, IPC_POLL_MS);
+//   };
+//   setTimeout(pollIpcDuringQuery, IPC_POLL_MS);
+// 
+//   let newSessionId: string | undefined;
+//   let lastAssistantUuid: string | undefined;
+//   let messageCount = 0;
+//   let resultCount = 0;
+// 
+//   // Load global CLAUDE.md as additional system context (shared across all groups)
+//   const globalClaudeMdPath = '/workspace/global/CLAUDE.md';
+//   let globalClaudeMd: string | undefined;
+//   if (!containerInput.isMain && fs.existsSync(globalClaudeMdPath)) {
+//     globalClaudeMd = fs.readFileSync(globalClaudeMdPath, 'utf-8');
+//   }
+// 
+//   // Discover additional directories mounted at /workspace/extra/*
+//   // These are passed to the SDK so their CLAUDE.md files are loaded automatically
+//   const extraDirs: string[] = [];
+//   const extraBase = '/workspace/extra';
+//   if (fs.existsSync(extraBase)) {
+//     for (const entry of fs.readdirSync(extraBase)) {
+//       const fullPath = path.join(extraBase, entry);
+//       if (fs.statSync(fullPath).isDirectory()) {
+//         extraDirs.push(fullPath);
+//       }
+//     }
+//   }
+//   if (extraDirs.length > 0) {
+//     log(`Additional directories: ${extraDirs.join(', ')}`);
+//   }
+// 
+//   for await (const message of query({
+//     prompt: stream,
+//     options: {
+//       cwd: '/workspace/group',
+//       additionalDirectories: extraDirs.length > 0 ? extraDirs : undefined,
+//       resume: sessionId,
+//       resumeSessionAt: resumeAt,
+//       systemPrompt: globalClaudeMd
+//         ? { type: 'preset' as const, preset: 'claude_code' as const, append: globalClaudeMd }
+//         : undefined,
+//       allowedTools: [
+//         'Bash',
+//         'Read', 'Write', 'Edit', 'Glob', 'Grep',
+//         'WebSearch', 'WebFetch',
+//         'Task', 'TaskOutput', 'TaskStop',
+//         'TeamCreate', 'TeamDelete', 'SendMessage',
+//         'TodoWrite', 'ToolSearch', 'Skill',
+//         'NotebookEdit',
+//         'mcp__nanoclaw__*'
+//       ],
+//       env: sdkEnv,
+//       permissionMode: 'bypassPermissions',
+//       allowDangerouslySkipPermissions: true,
+//       settingSources: ['project', 'user'],
+//       mcpServers: {
+//         nanoclaw: {
+//           command: 'node',
+//           args: [mcpServerPath],
+//           env: {
+//             NANOCLAW_CHAT_JID: containerInput.chatJid,
+//             NANOCLAW_GROUP_FOLDER: containerInput.groupFolder,
+//             NANOCLAW_IS_MAIN: containerInput.isMain ? '1' : '0',
+//           },
+//         },
+//       },
+//       hooks: {
+//         PreCompact: [{ hooks: [createPreCompactHook(containerInput.assistantName)] }],
+//         PreToolUse: [{ matcher: 'Bash', hooks: [createSanitizeBashHook()] }],
+//       },
+//     }
+//   })) {
+//     messageCount++;
+//     const msgType = message.type === 'system' ? `system/${(message as { subtype?: string }).subtype}` : message.type;
+//     log(`[msg #${messageCount}] type=${msgType}`);
+// 
+//     if (message.type === 'assistant' && 'uuid' in message) {
+//       lastAssistantUuid = (message as { uuid: string }).uuid;
+//     }
+// 
+//     if (message.type === 'system' && message.subtype === 'init') {
+//       newSessionId = message.session_id;
+//       log(`Session initialized: ${newSessionId}`);
+//     }
+// 
+//     if (message.type === 'system' && (message as { subtype?: string }).subtype === 'task_notification') {
+//       const tn = message as { task_id: string; status: string; summary: string };
+//       log(`Task notification: task=${tn.task_id} status=${tn.status} summary=${tn.summary}`);
+//     }
+// 
+//     if (message.type === 'result') {
+//       resultCount++;
+//       const textResult = 'result' in message ? (message as { result?: string }).result : null;
+//       log(`Result #${resultCount}: subtype=${message.subtype}${textResult ? ` text=${textResult.slice(0, 200)}` : ''}`);
+//       writeOutput({
+//         status: 'success',
+//         result: textResult || null,
+//         newSessionId
+//       });
+//     }
+//   }
+// 
+//   ipcPolling = false;
+//   log(`Query done. Messages: ${messageCount}, results: ${resultCount}, lastAssistantUuid: ${lastAssistantUuid || 'none'}, closedDuringQuery: ${closedDuringQuery}`);
+//   return { newSessionId, lastAssistantUuid, closedDuringQuery };
+// }
+// 
+// 
+
 async function runQuery(
   prompt: string,
   sessionId: string | undefined,
@@ -362,133 +508,135 @@ async function runQuery(
   sdkEnv: Record<string, string | undefined>,
   resumeAt?: string,
 ): Promise<{ newSessionId?: string; lastAssistantUuid?: string; closedDuringQuery: boolean }> {
-  const stream = new MessageStream();
-  stream.push(prompt);
-
-  // Poll IPC for follow-up messages and _close sentinel during the query
-  let ipcPolling = true;
+  let messages: any[] = [];
   let closedDuringQuery = false;
-  const pollIpcDuringQuery = () => {
-    if (!ipcPolling) return;
-    if (shouldClose()) {
-      log('Close sentinel detected during query, ending stream');
-      closedDuringQuery = true;
-      stream.end();
-      ipcPolling = false;
-      return;
-    }
-    const messages = drainIpcInput();
-    for (const text of messages) {
-      log(`Piping IPC message into active query (${text.length} chars)`);
-      stream.push(text);
-    }
-    setTimeout(pollIpcDuringQuery, IPC_POLL_MS);
-  };
-  setTimeout(pollIpcDuringQuery, IPC_POLL_MS);
 
-  let newSessionId: string | undefined;
-  let lastAssistantUuid: string | undefined;
-  let messageCount = 0;
-  let resultCount = 0;
-
-  // Load global CLAUDE.md as additional system context (shared across all groups)
+  // Add global CLAUDE.md if exists
   const globalClaudeMdPath = '/workspace/global/CLAUDE.md';
-  let globalClaudeMd: string | undefined;
   if (!containerInput.isMain && fs.existsSync(globalClaudeMdPath)) {
-    globalClaudeMd = fs.readFileSync(globalClaudeMdPath, 'utf-8');
+    messages.push({ role: 'system', content: fs.readFileSync(globalClaudeMdPath, 'utf8') });
   }
 
-  // Discover additional directories mounted at /workspace/extra/*
-  // These are passed to the SDK so their CLAUDE.md files are loaded automatically
-  const extraDirs: string[] = [];
-  const extraBase = '/workspace/extra';
-  if (fs.existsSync(extraBase)) {
-    for (const entry of fs.readdirSync(extraBase)) {
-      const fullPath = path.join(extraBase, entry);
-      if (fs.statSync(fullPath).isDirectory()) {
-        extraDirs.push(fullPath);
-      }
-    }
-  }
-  if (extraDirs.length > 0) {
-    log(`Additional directories: ${extraDirs.join(', ')}`);
-  }
+  if (prompt) messages.push({ role: 'user', content: prompt });
 
-  for await (const message of query({
-    prompt: stream,
-    options: {
-      cwd: '/workspace/group',
-      additionalDirectories: extraDirs.length > 0 ? extraDirs : undefined,
-      resume: sessionId,
-      resumeSessionAt: resumeAt,
-      systemPrompt: globalClaudeMd
-        ? { type: 'preset' as const, preset: 'claude_code' as const, append: globalClaudeMd }
-        : undefined,
-      allowedTools: [
-        'Bash',
-        'Read', 'Write', 'Edit', 'Glob', 'Grep',
-        'WebSearch', 'WebFetch',
-        'Task', 'TaskOutput', 'TaskStop',
-        'TeamCreate', 'TeamDelete', 'SendMessage',
-        'TodoWrite', 'ToolSearch', 'Skill',
-        'NotebookEdit',
-        'mcp__nanoclaw__*'
-      ],
-      env: sdkEnv,
-      permissionMode: 'bypassPermissions',
-      allowDangerouslySkipPermissions: true,
-      settingSources: ['project', 'user'],
-      mcpServers: {
-        nanoclaw: {
-          command: 'node',
-          args: [mcpServerPath],
-          env: {
-            NANOCLAW_CHAT_JID: containerInput.chatJid,
-            NANOCLAW_GROUP_FOLDER: containerInput.groupFolder,
-            NANOCLAW_IS_MAIN: containerInput.isMain ? '1' : '0',
-          },
-        },
-      },
-      hooks: {
-        PreCompact: [{ hooks: [createPreCompactHook(containerInput.assistantName)] }],
-        PreToolUse: [{ matcher: 'Bash', hooks: [createSanitizeBashHook()] }],
-      },
-    }
-  })) {
-    messageCount++;
-    const msgType = message.type === 'system' ? `system/${(message as { subtype?: string }).subtype}` : message.type;
-    log(`[msg #${messageCount}] type=${msgType}`);
+  while (true) {
+    log(`Starting Ollama fetch loop (session: ${sessionId || 'new'})...`);
 
-    if (message.type === 'assistant' && 'uuid' in message) {
-      lastAssistantUuid = (message as { uuid: string }).uuid;
+    if (shouldClose()) {
+      log('Close sentinel detected, exiting');
+      closedDuringQuery = true;
+      break;
+    }
+    const pendingBefore = drainIpcInput();
+    if (pendingBefore.length > 0) {
+      log(`Appended ${pendingBefore.length} IPC messages before fetch`);
+      messages.push({ role: 'user', content: pendingBefore.join('\n') });
     }
 
-    if (message.type === 'system' && message.subtype === 'init') {
-      newSessionId = message.session_id;
-      log(`Session initialized: ${newSessionId}`);
-    }
+    const baseUrl = sdkEnv.OLLAMA_BASE_URL || 'https://api.openrouter.ai/v1'; // Default to cloud/minimax if empty
+    const apiUrl = `${baseUrl.replace(/\/$/, '')}/api/chat`;
+    const apiKey = sdkEnv.OLLAMA_API_KEY || sdkEnv.ANTHROPIC_API_KEY || '';
 
-    if (message.type === 'system' && (message as { subtype?: string }).subtype === 'task_notification') {
-      const tn = message as { task_id: string; status: string; summary: string };
-      log(`Task notification: task=${tn.task_id} status=${tn.status} summary=${tn.summary}`);
-    }
+    log(`======== ${sdkEnv.OLLAMA_BASE_URL} $$$$$$$$$$$$$`);
+    log(`======== ${process.env.OLLAMA_BASE_URL} $$$$$$$$$$$$$`);
+    log(`[DEBUG] Đang gọi tới URL: ${apiUrl} với Model: minimax-m2.5:cloud`);
 
-    if (message.type === 'result') {
-      resultCount++;
-      const textResult = 'result' in message ? (message as { result?: string }).result : null;
-      log(`Result #${resultCount}: subtype=${message.subtype}${textResult ? ` text=${textResult.slice(0, 200)}` : ''}`);
-      writeOutput({
-        status: 'success',
-        result: textResult || null,
-        newSessionId
+    const payload = {
+      model: "minimax-m2.5:cloud",
+      messages: messages,
+      stream: false,
+      tools: LOCAL_TOOLS.map(t => ({
+        type: t.type,
+        function: t.function
+      }))
+    };
+
+    const headers: Record<string, string> = { "Content-Type": "application/json" };
+    if (apiKey) headers["Authorization"] = `Bearer ${apiKey}`;
+
+    let response: Response;
+    let resText = "";
+    try {
+      response = await fetch(apiUrl, {
+        method: 'POST',
+        headers,
+        body: JSON.stringify(payload)
       });
+      resText = await response.text();
+    } catch (fetchErr: any) {
+      log(`Fetch error: ${fetchErr.message}`);
+      throw fetchErr;
     }
+
+    let resData;
+    try {
+      resData = JSON.parse(resText);
+    } catch (e) {
+      log(`Failed to parse JSON response: ${resText.slice(0, 100)}`);
+      throw new Error("Invalid JSON from LLM: " + resText.slice(0, 500));
+    }
+
+    if (!response.ok) {
+      throw new Error(`Ollama API Error ${response.hasOwnProperty('status') ? response.status : 'Mock'}: ${resText}`);
+    }
+
+    const asstMsg = resData.message;
+    if (!asstMsg) {
+      throw new Error(`Malformed response, no message field: ${resText.slice(0, 200)}`);
+    }
+
+    messages.push(asstMsg);
+
+    if (asstMsg.tool_calls && asstMsg.tool_calls.length > 0) {
+      log(`Found ${asstMsg.tool_calls.length} tool calls.`);
+
+      for (const tc of asstMsg.tool_calls) {
+        log(`Executing tool: ${tc.function.name}`);
+        const args = tc.function.arguments || {};
+        const resultStr = await executeTool(tc.function.name, args, {
+          chatJid: containerInput.chatJid,
+          groupFolder: containerInput.groupFolder,
+          isMain: containerInput.isMain
+        });
+
+        messages.push({
+          role: 'tool',
+          content: resultStr,
+          name: tc.function.name
+        });
+        log(`Tool ${tc.function.name} output: ${resultStr.slice(0, 100)}`);
+      }
+      continue;
+    }
+
+    const finalOutput = asstMsg.content || "";
+    log(`Final output generated (${finalOutput.length} chars)`);
+
+    writeOutput({
+      status: 'success',
+      result: finalOutput || null,
+      newSessionId: sessionId
+    });
+
+    log('Query ended, waiting for next IPC message...');
+    const nextMessage = await waitForIpcMessage();
+    if (nextMessage === null) {
+      log('Close sentinel received, exiting');
+      closedDuringQuery = true;
+      break;
+    }
+
+    log(`Got new message (${nextMessage.length} chars), continuing loop`);
+    messages.push({ role: 'user', content: nextMessage });
   }
 
-  ipcPolling = false;
-  log(`Query done. Messages: ${messageCount}, results: ${resultCount}, lastAssistantUuid: ${lastAssistantUuid || 'none'}, closedDuringQuery: ${closedDuringQuery}`);
-  return { newSessionId, lastAssistantUuid, closedDuringQuery };
+  return { newSessionId: sessionId, lastAssistantUuid: undefined, closedDuringQuery };
 }
+
+// ======================================================================
+// ================== Main function =====================================
+// ======================================================================
+
 
 async function main(): Promise<void> {
   let containerInput: ContainerInput;
