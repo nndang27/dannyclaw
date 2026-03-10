@@ -8,8 +8,8 @@ export interface EditBlock {
 
 export async function editFile(filePath: string, edits: EditBlock[]): Promise<string> {
 
-    const debugLog = `\n--- DEBUG EDIT ---\nFile: ${filePath}\nEdits: ${JSON.stringify(edits, null, 2)}\n`;
-    fs.appendFileSync('/workspace/group/debug_edit.txt', debugLog, 'utf8');
+    // const debugLog = `\n--- DEBUG GLOB ---\nPattern: ${pattern}\nWorkspace Dir: ${workspaceDir}\n`;
+    // fs.appendFileSync('/workspace/group/debug_glob.txt', debugLog, 'utf8');
     try {
         if (!fs.existsSync(filePath)) {
             return `Error: File not found at ${filePath}.`;

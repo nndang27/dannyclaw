@@ -4,6 +4,8 @@ import path from 'path';
 import { promisify } from 'util';
 import { CronExpressionParser } from 'cron-parser';
 import { editFile } from './tools/edit-file.js';
+import { globFiles } from './tools/glob-file.js';
+import { grepFiles } from './tools/grep-file.js';
 
 const execAsync = promisify(exec);
 
@@ -31,6 +33,9 @@ export interface ToolDefinition {
     execute: (args: any, context: { chatJid: string, groupFolder: string, isMain: boolean }) => Promise<string>;
 }
 
+// ==========================================================================================================================================
+// ======================= BASH =====================================================================================================
+// ==========================================================================================================================================
 export const LOCAL_TOOLS: ToolDefinition[] = [
     {
         type: "function",
@@ -54,6 +59,9 @@ export const LOCAL_TOOLS: ToolDefinition[] = [
             }
         }
     },
+// ==========================================================================================================================================
+// ======================= READ FILE =====================================================================================================
+// ==========================================================================================================================================
     {
         type: "function",
         function: {
@@ -75,6 +83,9 @@ export const LOCAL_TOOLS: ToolDefinition[] = [
             }
         }
     },
+// ==========================================================================================================================================
+// ======================= WRITE FILE =====================================================================================================
+// ==========================================================================================================================================
     {
         type: "function",
         function: {
@@ -99,6 +110,9 @@ export const LOCAL_TOOLS: ToolDefinition[] = [
             }
         }
     },
+// ==========================================================================================================================================
+// ======================= EDIT FILE =====================================================================================================
+// ==========================================================================================================================================
     {
         type: "function",
         function: {
@@ -137,6 +151,56 @@ export const LOCAL_TOOLS: ToolDefinition[] = [
             return await editFile(args.path, args.edits);
         }
     },
+// ==========================================================================================================================================
+// ======================= GLOB FILE =====================================================================================================
+// ==========================================================================================================================================
+    {
+        type: "function",
+        function: {
+            name: "Glob",
+            description: "Search for files by name or pattern within the workspace. Essential for understanding directory structures. Supports standard glob patterns (e.g., '**/*.md', 'src/**/*.ts'). Automatically ignores node_modules, .git, and build folders to keep output clean.",
+            parameters: {
+                type: "object",
+                properties: {
+                    pattern: { 
+                        type: "string", 
+                        description: "The glob pattern to search for. Use '**/*' to list all files in a folder, or '**/*.ts' to find specific extensions." 
+                    }
+                },
+                required: ["pattern"]
+            }
+        },
+        execute: async (args) => {
+            return await globFiles(args.pattern);
+        }
+    },
+// ==========================================================================================================================================
+// ======================= GREP FILE =====================================================================================================
+// ==========================================================================================================================================
+    {
+        type: "function",
+        function: {
+            name: "Grep",
+            description: "Search for a specific text string or regex pattern INSIDE all files in the workspace. It returns the exact file path, line number, and the line content. Essential for finding where variables, functions, or specific words are used across the project. Automatically ignores binary files and node_modules.",
+            parameters: {
+                type: "object",
+                properties: {
+                    query: { 
+                        type: "string", 
+                        description: "The text string to search for (e.g., 'API_KEY', 'function calculateRSI', 'TODO:')." 
+                    }
+                },
+                required: ["query"]
+            }
+        },
+        execute: async (args) => {
+            return await grepFiles(args.query);
+        }
+    },
+// ==========================================================================================================================================
+// ======================= SEND MESSAGE =====================================================================================================
+// ==========================================================================================================================================
+
     {
         type: "function",
         function: {
@@ -164,6 +228,9 @@ export const LOCAL_TOOLS: ToolDefinition[] = [
             return "Message sent.";
         }
     },
+// ==========================================================================================================================================
+// ======================= SCHEDULE TASK GROUP =====================================================================================================
+// ==========================================================================================================================================
     {
         type: "function",
         function: {
@@ -206,6 +273,7 @@ export const LOCAL_TOOLS: ToolDefinition[] = [
             return `Task scheduled (${filename}): ${args.schedule_type} - ${args.schedule_value}`;
         }
     },
+    // ================ List task =====================================================================================================
     {
         type: "function",
         function: {
@@ -227,6 +295,7 @@ export const LOCAL_TOOLS: ToolDefinition[] = [
             }
         }
     },
+    // ================ Cancel task =====================================================================================================
     {
         type: "function",
         function: {
@@ -245,7 +314,9 @@ export const LOCAL_TOOLS: ToolDefinition[] = [
         }
     }
 ];
-
+// ==========================================================================================================================================
+// ======================= EXECUTE TOOL =====================================================================================================
+// ==========================================================================================================================================
 export async function executeTool(name: string, args: any, context: { chatJid: string, groupFolder: string, isMain: boolean }): Promise<string> {
     const tool = LOCAL_TOOLS.find(t => t.function.name === name);
     if (!tool) {
