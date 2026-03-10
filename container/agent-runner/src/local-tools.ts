@@ -3,6 +3,7 @@ import fs from 'fs';
 import path from 'path';
 import { promisify } from 'util';
 import { CronExpressionParser } from 'cron-parser';
+import { editFile } from './tools/edit-file.js';
 
 const execAsync = promisify(exec);
 
@@ -96,6 +97,44 @@ export const LOCAL_TOOLS: ToolDefinition[] = [
             } catch (err: any) {
                 return `Error: ${err.message}`;
             }
+        }
+    },
+    {
+        type: "function",
+        function: {
+            name: "Edit",
+            description: "Safely edit a file using atomic Multi-Block Search/Replace. You can make multiple changes at once. For each change, provide the exact existing text (search_block) with enough surrounding context lines to make it unique, and the new text (replace_block).",
+            parameters: {
+                type: "object",
+                properties: {
+                    path: { 
+                        type: "string", 
+                        description: "Absolute path to the file (e.g., /workspace/group/file.ts)" 
+                    },
+                    edits: {
+                        type: "array",
+                        description: "A list of edits to apply to the file.",
+                        items: {
+                            type: "object",
+                            properties: {
+                                search_block: { 
+                                    type: "string",
+                                    description: "The EXACT text block currently in the file. Must include surrounding context lines to ensure it matches exactly ONE place."
+                                },
+                                replace_block: { 
+                                    type: "string",
+                                    description: "The new text block that will replace the search_block."
+                                }
+                            },
+                            required: ["search_block", "replace_block"]
+                        }
+                    }
+                },
+                required: ["path", "edits"]
+            }
+        },
+        execute: async (args) => {
+            return await editFile(args.path, args.edits);
         }
     },
     {
